@@ -1,0 +1,147 @@
+﻿@page "/"
+
+@inject TriadaBookClient Client
+@inject NavigationManager NavigationManager
+
+<Form Layout="@FormLayout.Inline" Model="_filter">
+    <FormItem>
+        <Input @bind-Value="@context.Title" OnInput="OnTitleInput" Placeholder="Title" />
+    </FormItem>
+    <FormItem>
+        <Input @bind-Value="@context.Author" OnInput="OnAuthorInput" Placeholder="Author" />
+    </FormItem>
+    <FormItem>
+        <Input @bind-Value="@context.Category" OnInput="OnCategoryInput" Placeholder="Category" />
+    </FormItem>
+    <Button OnClick="Reset">
+        Clear
+    </Button>
+</Form>
+<Divider></Divider>
+
+<Table DataSource="_filteredBooks" Bordered=@true HidePagination="@false" PageSize="25" Loading="_isLoading" Size=@TableSize.Middle>
+    <Column @bind-Field="@context.Title">
+        <a @onclick:preventDefault @onclick:stopPropagation @onclick="() => Download(context.FileName, _categories[context.Category].Name)">@context.Title</a>
+    </Column>
+    <Column @bind-Field="@context.Author" />
+    <Column @bind-Field="@context.Category">
+        @_categories[context.Category].Title
+    </Column>
+</Table>
+
+<Modal Title="AccessCodeDialogTitle"
+       Visible="_showAccessCodeDialog"
+       OnOk="@HandleAccessCode">
+    <Input OnInput="OnAccessCodeInput" Type="password" TValue="string" />
+</Modal>
+
+@code {
+
+    const string AccessCodeDialogTitle = "Access Code";
+    private bool _showAccessCodeDialog = true;
+    private string _accessCode = "";
+    Filter _filter = new Filter();
+    Dictionary<int, Category> _categories = new Dictionary<int, Category>(40);
+    List<Book> _books = new List<Book>(5700);
+    Book[] _filteredBooks = Array.Empty<Book>();
+
+    private bool _isLoading = false;
+
+    private async Task LoadData()
+    {
+        try
+        {
+            _isLoading = true;
+            var categories = await Client.GetCategories();
+            var books = await Client.GetBooks();
+
+            _categories = categories.ToDictionary(k => k.Number, v => v);
+            _books.AddRange(books);
+            ApplyFilter();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void OnTitleInput(ChangeEventArgs e)
+    {
+        _filter.Title = e.Value.ToString();
+        ApplyFilter();
+    }
+
+    private void OnAuthorInput(ChangeEventArgs e)
+    {
+        _filter.Author = e.Value.ToString();
+        ApplyFilter();
+    }
+
+    private void OnCategoryInput(ChangeEventArgs e)
+    {
+        _filter.Category = e.Value.ToString();
+        ApplyFilter();
+    }
+
+    private void Reset(MouseEventArgs args)
+    {
+        _filter = new Filter();
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        _isLoading = true;
+        var filterExpression = _books.AsEnumerable();
+
+        if (!string.IsNullOrEmpty(_filter.Title))
+        {
+            filterExpression = filterExpression.Where(b => b.Title.Contains(_filter.Title, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrEmpty(_filter.Author))
+        {
+            filterExpression = filterExpression.Where(b => b.Author.Contains(_filter.Author, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrEmpty(_filter.Category))
+        {
+            var matchingCategories = _categories.Values
+                .Where(c => c.Title.Contains(_filter.Category, StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.Number)
+                .ToArray();
+
+            filterExpression = filterExpression.Where(b => matchingCategories.Contains(b.Category));
+        }
+
+        _filteredBooks = filterExpression.ToArray();
+        _isLoading = false;
+    }
+
+    private async Task Download(string file, string category)
+    {
+        var url = await Client.DownloadUrl(category, file);
+        NavigationManager.NavigateTo(url);
+    }
+
+    private async Task HandleAccessCode(MouseEventArgs e)
+    {
+        Client.SetAccessCode(_accessCode);
+        _showAccessCodeDialog = false;
+        await LoadData();
+    }
+
+    private void OnAccessCodeInput(ChangeEventArgs e)
+    {
+        _accessCode = e.Value.ToString();
+    }
+
+    class Filter
+    {
+        public string Title { get; set; }
+
+        public string Author { get; set; }
+
+        public string Category { get; set; }
+    }
+}
